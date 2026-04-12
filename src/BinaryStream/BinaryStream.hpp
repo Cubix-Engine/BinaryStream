@@ -263,9 +263,17 @@ namespace cubix {
             return unwrap(this->tryReadVarUint32());
         }
 
+        [[nodiscard]] std::expected<int32_t, BinaryStream::ErrorInfo> tryReadVarInt32() {
+            const auto raw = this->tryReadVarUint32();
+            if (!raw) {
+                return std::unexpected(raw.error());
+            }
+
+            return static_cast<int32_t>(*raw >> 1) ^ -static_cast<int32_t>(*raw & 1);
+        }
+
         [[nodiscard]] int32_t readVarInt32() {
-            const uint32_t raw = this->readVarUint32();
-            return static_cast<int32_t>(raw >> 1) ^ -static_cast<int32_t>(raw & 1);
+            return unwrap(this->tryReadVarInt32());
         }
 
         template <std::endian E = std::endian::little>
@@ -340,9 +348,17 @@ namespace cubix {
             return unwrap(this->tryReadVarUint64());
         }
 
+        [[nodiscard]] std::expected<int64_t, BinaryStream::ErrorInfo> tryReadVarInt64() {
+            const auto raw = this->tryReadVarUint64();
+            if (!raw) {
+                return std::unexpected(raw.error());
+            }
+
+            return static_cast<int64_t>(*raw >> 1) ^ -static_cast<int64_t>(*raw & 1);
+        }
+
         [[nodiscard]] int64_t readVarInt64() {
-            const uint64_t raw = this->readVarUint64();
-            return static_cast<int64_t>(raw >> 1) ^ -static_cast<int64_t>(raw & 1);
+            return unwrap(this->tryReadVarInt64());
         }
 
         template <std::endian E = std::endian::little>
