@@ -1,0 +1,9 @@
+**/.DS_STORE
+
+build/
+out/
+
+.vs/
+.idea/**/*
+!.idea/codeStyles
+!.idea/icon.png
