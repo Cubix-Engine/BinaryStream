@@ -8,6 +8,7 @@
 #include <span>
 #include <sstream>
 #include <stdexcept>
+#include <format>
 #include <string>
 #include <vector>
 
