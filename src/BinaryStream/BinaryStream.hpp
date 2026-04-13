@@ -2,7 +2,6 @@
 #define BINARYSTREAM_HPP
 
 #include <bit>
-#include <cstring>
 #include <expected>
 #include <iomanip>
 #include <optional>
@@ -15,36 +14,70 @@
 namespace cubix {
     class BinaryStreamException : public std::runtime_error {
     public:
-        enum class ReadError {
+        enum class Error {
             OutOfBounds,
             MalformedVarInt,
             MalformedVarLong,
             InvalidStringLength
         };
 
-        struct ReadErrorInfo {
-            ReadError   type{};
-            size_t      position{};
-            std::string message{};
-        };
-
-        ReadErrorInfo info{};
+    private:
+        Error  mType{};
+        size_t mPosition{};
 
     public:
-        explicit BinaryStreamException(ReadErrorInfo err)
-            : std::runtime_error(err.message), info(std::move(err)) {};
+        explicit BinaryStreamException(
+            const Error type, const size_t position = 0, const std::string_view message = ""
+        )
+            : std::runtime_error(makeMessage(type, position, message)), mType(type),
+              mPosition(position) {};
+
+        [[nodiscard]] Error type() const noexcept {
+            return mType;
+        }
+        [[nodiscard]] size_t position() const noexcept {
+            return mPosition;
+        }
+
+        static BinaryStreamException outOfBounds(const size_t pos) {
+            return BinaryStreamException{Error::OutOfBounds, pos};
+        }
+
+        static std::string_view toString(const Error type) {
+            switch (type) {
+            case Error::OutOfBounds:
+                return "OutOfBounds";
+            case Error::MalformedVarInt:
+                return "MalformedVarInt";
+            case Error::MalformedVarLong:
+                return "MalformedVarLong";
+            case Error::InvalidStringLength:
+                return "InvalidStringLength";
+            }
+
+            return "Unknown";
+        }
+
+    private:
+        static std::string
+        makeMessage(const Error type, size_t position, std::string_view message = "") {
+            if (message.empty()) {
+                return std::format("BinaryStream: {} at {}", toString(type), position);
+            }
+
+            return std::format("BinaryStream: {} at {}: {}", toString(type), position, message);
+        }
     };
 
     // BinaryStream stores data in a std::vector.
     // Any write may reallocate and invalidate spans returned by readBytes().
     class BinaryStream {
     public:
-        using Error     = BinaryStreamException::ReadError;
-        using ErrorInfo = BinaryStreamException::ReadErrorInfo;
+        using Error = BinaryStreamException::Error;
 
         template <typename T, std::endian E>
         struct serialize {
-            static std::expected<T, BinaryStream::ErrorInfo> read(BinaryStream& stream) {
+            static std::expected<T, BinaryStreamException> read(BinaryStream& stream) {
                 if constexpr (std::is_integral_v<T> || std::is_floating_point_v<T>) {
                     return stream.tryRead<T, E>();
                 }
@@ -136,7 +169,7 @@ namespace cubix {
         }
 
         template <typename T, std::endian E = std::endian::little>
-        std::expected<T, BinaryStream::ErrorInfo> peek() noexcept {
+        std::expected<T, BinaryStreamException> peek() noexcept {
             const auto pos   = mReadPos;
             auto       value = tryRead<T, E>();
 
@@ -172,11 +205,13 @@ namespace cubix {
             return static_cast<int8_t>(value);
         }
 
-        [[nodiscard]] std::expected<std::span<const uint8_t>, BinaryStream::ErrorInfo>
+        [[nodiscard]] std::expected<std::span<const uint8_t>, BinaryStreamException>
         tryReadBytes(const size_t length) noexcept {
             if (!canRead(length)) {
                 return std::unexpected(
-                    ErrorInfo{Error::OutOfBounds, mReadPos, "Not enough bytes to read"}
+                    BinaryStreamException{
+                        Error::OutOfBounds, mReadPos, "Not enough bytes to read"
+                    }
                 );
             }
 
@@ -193,7 +228,7 @@ namespace cubix {
         }
 
         template <typename T, std::endian E = std::endian::little>
-        [[nodiscard]] std::expected<T, BinaryStream::ErrorInfo> tryRead() noexcept {
+        [[nodiscard]] std::expected<T, BinaryStreamException> tryRead() noexcept {
             static_assert(
                 std::is_trivially_copyable_v<T>,
                 "BinaryStream::tryRead requires trivially copyable type"
@@ -201,7 +236,9 @@ namespace cubix {
 
             if (!canRead(sizeof(T))) {
                 return std::unexpected(
-                    ErrorInfo{Error::OutOfBounds, mReadPos, "Not enough bytes to read value"}
+                    BinaryStreamException{
+                        Error::OutOfBounds, mReadPos, "Not enough bytes to read value"
+                    }
                 );
             }
 
@@ -217,11 +254,11 @@ namespace cubix {
             return unwrap(serialize<T, E>::read(*this));
         }
 
-        [[nodiscard]] std::expected<uint32_t, BinaryStream::ErrorInfo>
+        [[nodiscard]] std::expected<uint32_t, BinaryStreamException>
         tryReadVarUint32() noexcept {
             if (bytesLeft() < 1) {
                 return std::unexpected(
-                    ErrorInfo{
+                    BinaryStreamException{
                         Error::OutOfBounds, mReadPos, "Unexpected end while reading VarInt"
                     }
                 );
@@ -248,14 +285,14 @@ namespace cubix {
             // If we consumed all allowed bytes and still not finished:
             if (maxReadable < 5) {
                 return std::unexpected(
-                    ErrorInfo{
+                    BinaryStreamException{
                         Error::OutOfBounds, mReadPos, "Unexpected end while reading VarInt"
                     }
                 );
             }
 
             return std::unexpected(
-                ErrorInfo{Error::MalformedVarInt, mReadPos, "VarInt too large"}
+                BinaryStreamException{Error::MalformedVarInt, mReadPos, "VarInt too large"}
             );
         }
 
@@ -263,7 +300,7 @@ namespace cubix {
             return unwrap(this->tryReadVarUint32());
         }
 
-        [[nodiscard]] std::expected<int32_t, BinaryStream::ErrorInfo> tryReadVarInt32() {
+        [[nodiscard]] std::expected<int32_t, BinaryStreamException> tryReadVarInt32() {
             const auto raw = this->tryReadVarUint32();
             if (!raw) {
                 return std::unexpected(raw.error());
@@ -298,11 +335,11 @@ namespace cubix {
             return static_cast<int16_t>(raw);
         }
 
-        [[nodiscard]] std::expected<uint64_t, BinaryStream::ErrorInfo>
+        [[nodiscard]] std::expected<uint64_t, BinaryStreamException>
         tryReadVarUint64() noexcept {
             if (bytesLeft() < 1) {
                 return std::unexpected(
-                    ErrorInfo{
+                    BinaryStreamException{
                         Error::OutOfBounds, mReadPos, "Unexpected end while reading VarLong"
                     }
                 );
@@ -319,7 +356,9 @@ namespace cubix {
                 // Stricter check: The 10th byte of a VarLong can only hold 1 bit.
                 if (i == 9 && (byte & ~0x01)) {
                     return std::unexpected(
-                        ErrorInfo{Error::MalformedVarLong, mReadPos, "VarLong overflow"}
+                        BinaryStreamException{
+                            Error::MalformedVarLong, mReadPos, "VarLong overflow"
+                        }
                     );
                 }
 
@@ -333,14 +372,14 @@ namespace cubix {
 
             if (maxReadable < 10) {
                 return std::unexpected(
-                    ErrorInfo{
+                    BinaryStreamException{
                         Error::OutOfBounds, mReadPos, "Unexpected end while reading VarLong"
                     }
                 );
             }
 
             return std::unexpected(
-                ErrorInfo{Error::MalformedVarLong, mReadPos, "VarLong too large"}
+                BinaryStreamException{Error::MalformedVarLong, mReadPos, "VarLong too large"}
             );
         }
 
@@ -348,7 +387,7 @@ namespace cubix {
             return unwrap(this->tryReadVarUint64());
         }
 
-        [[nodiscard]] std::expected<int64_t, BinaryStream::ErrorInfo> tryReadVarInt64() {
+        [[nodiscard]] std::expected<int64_t, BinaryStreamException> tryReadVarInt64() {
             const auto raw = this->tryReadVarUint64();
             if (!raw) {
                 return std::unexpected(raw.error());
@@ -372,7 +411,7 @@ namespace cubix {
             return static_cast<int64_t>(raw);
         }
 
-        [[nodiscard]] std::expected<std::string, BinaryStream::ErrorInfo>
+        [[nodiscard]] std::expected<std::string, BinaryStreamException>
         tryReadString(const size_t length) noexcept {
             auto bytes = tryReadBytes(length);
             if (!bytes) {
@@ -383,7 +422,7 @@ namespace cubix {
         }
 
         template <std::endian E = std::endian::little>
-        [[nodiscard]] std::expected<std::string, BinaryStream::ErrorInfo> tryReadString() {
+        [[nodiscard]] std::expected<std::string, BinaryStreamException> tryReadString() {
             auto length = tryRead<uint32_t, E>();
             if (!length) {
                 return std::unexpected(length.error());
@@ -568,7 +607,7 @@ namespace cubix {
 
     private:
         template <typename T>
-        [[nodiscard]] static T unwrap(std::expected<T, BinaryStream::ErrorInfo>&& result) {
+        [[nodiscard]] static T unwrap(std::expected<T, BinaryStreamException>&& result) {
             if (!result) {
                 throw BinaryStreamException(std::move(result.error()));
             }
@@ -580,16 +619,17 @@ namespace cubix {
     template <typename T, std::endian E>
     struct cubix::BinaryStream::serialize<std::vector<T>, E> {
 
-        static std::expected<std::vector<T>, ErrorInfo> read(cubix::BinaryStream& stream) {
+        static std::expected<std::vector<T>, BinaryStreamException>
+        read(cubix::BinaryStream& stream) {
 
             return stream.tryRead<uint32_t, E>().and_then(
-                [&](auto size) -> std::expected<std::vector<T>, ErrorInfo> {
+                [&](auto size) -> std::expected<std::vector<T>, BinaryStreamException> {
                     std::vector<T> result;
 
                     if constexpr (std::is_trivially_copyable_v<T>) {
                         if (size > stream.bytesLeft() / sizeof(T)) {
                             return std::unexpected(
-                                ErrorInfo{
+                                BinaryStreamException{
                                     Error::OutOfBounds, stream.position(),
                                     "Vector size too large"
                                 }
@@ -640,7 +680,8 @@ namespace cubix {
     template <typename T, std::endian E>
     struct cubix::BinaryStream::serialize<std::optional<T>, E> {
 
-        static std::expected<std::optional<T>, ErrorInfo> read(cubix::BinaryStream& stream) {
+        static std::expected<std::optional<T>, BinaryStreamException>
+        read(cubix::BinaryStream& stream) {
 
             auto hasValue = stream.tryRead<bool>();
             if (!hasValue) {
@@ -671,7 +712,7 @@ namespace cubix {
     template <std::endian E>
     struct cubix::BinaryStream::serialize<std::string, E> {
 
-        static std::expected<std::string, ErrorInfo> read(BinaryStream& stream) {
+        static std::expected<std::string, BinaryStreamException> read(BinaryStream& stream) {
 
             return stream.tryRead<uint32_t, E>()
                 .and_then([&](auto length) { return stream.tryReadBytes(length); })
