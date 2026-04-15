@@ -589,8 +589,7 @@ namespace cubix {
             if constexpr (E == std::endian::native || sizeof(T) == 1) {
                 return value;
             }
-
-            if constexpr (std::is_integral_v<T>) {
+            else if constexpr (std::is_integral_v<T>) {
                 return std::byteswap(value);
             }
             else {
