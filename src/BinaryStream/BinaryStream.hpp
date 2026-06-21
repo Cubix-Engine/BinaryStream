@@ -2,13 +2,14 @@
 #define BINARYSTREAM_HPP
 
 #include <bit>
+#include <cstring>
 #include <expected>
+#include <format>
 #include <iomanip>
 #include <optional>
 #include <span>
 #include <sstream>
 #include <stdexcept>
-#include <format>
 #include <string>
 #include <vector>
 
@@ -136,9 +137,14 @@ namespace cubix {
         }
 
         [[nodiscard]] BinaryStream sliceCopy(const size_t length) {
-            auto bytes = readBytes(length);
+            const auto bytes = readBytes(length);
 
-            return BinaryStream(std::vector(bytes.begin(), bytes.end()));
+            std::vector<uint8_t> result{};
+            result.resize(length);
+
+            std::memcpy(result.data(), bytes.data(), length);
+
+            return BinaryStream(std::move(result));
         }
 
         [[nodiscard]] size_t size() const {
@@ -446,13 +452,11 @@ namespace cubix {
         }
 
         // Writers
-        void writeBytes(std::span<const uint8_t> bytes) {
-            if (const size_t newSize = mStream.size() + bytes.size();
-                newSize > mStream.capacity()) {
-                mStream.reserve(newSize);
-            }
+        void writeBytes(const std::span<const uint8_t> bytes) {
+            const auto oldSize = mStream.size();
 
-            mStream.insert(mStream.end(), bytes.begin(), bytes.end());
+            mStream.resize(oldSize + bytes.size());
+            std::memcpy(mStream.data() + oldSize, bytes.data(), bytes.size());
         }
 
         void writeBytes(const uint8_t* data, const size_t length) {
